@@ -1,27 +1,46 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AudioLines,
+  Brain,
+  BookOpen,
+  Camera,
+  FilePlus2,
+  Languages,
+  Link2,
+  MessageSquareText,
   Mic,
   MicOff,
-  Sparkles,
-  Languages,
-  BookOpen,
-  MessageSquareText,
-  Brain,
   NotebookPen,
   Orbit,
-  AudioLines
+  Sparkles,
+  Trash2,
+  Video
 } from "lucide-react";
 import "./styles.css";
 
 type LanguageSpace = "Tamil" | "Hindi" | "Kannada" | "English";
+type PracticeMode = "spoken" | "text" | "video";
+type SourceType = "pdf" | "pptx" | "docx" | "txt" | "notes" | "youtube" | "web";
 
-type JudgementReport = {
+type StudySource = {
+  id: string;
+  title: string;
+  type: SourceType;
+  content: string;
+  url?: string;
+  fileName?: string;
+  importedAt: string;
+};
+
+type MentorReport = {
   score: number;
   sourceMainIdea: string;
   understoodPoints: string[];
   missingPoints: string[];
   clarityAdvice: string[];
+  confidenceSignals: string[];
+  bodyLanguageAdvice: string[];
   followUpQuestion: string;
 };
 
@@ -31,13 +50,83 @@ type JudgeSettings = {
   ollamaModel: string;
 };
 
+type DraftState = {
+  activeSpace: LanguageSpace;
+  practiceMode: PracticeMode;
+  topic: string;
+  typedResponse: string;
+  transcript: string;
+  bodyLanguageNotes: string;
+  sources: StudySource[];
+};
+
 const DEFAULT_SETTINGS: JudgeSettings = {
   openRouterApiKey: "",
   openRouterModel: "openrouter/auto",
   ollamaModel: "llama3.1:8b"
 };
 
-const SETTINGS_STORAGE_KEY = "mentor-judge-settings-v1";
+const DEFAULT_DRAFT: DraftState = {
+  activeSpace: "English",
+  practiceMode: "spoken",
+  topic: "Explain what you studied today",
+  typedResponse: "",
+  transcript: "",
+  bodyLanguageNotes: "",
+  sources: []
+};
+
+const SETTINGS_STORAGE_KEY = "mentor-judge-settings-v2";
+const DRAFT_STORAGE_KEY = "mentor-practice-draft-v2";
+
+const languageSpaces: Array<{
+  name: LanguageSpace;
+  caption: string;
+  speechLang: string;
+}> = [
+  {
+    name: "Tamil",
+    caption: "Practice explain-back answers in Tamil, with Tanglish allowed when it helps you stay natural.",
+    speechLang: "ta-IN"
+  },
+  {
+    name: "Hindi",
+    caption: "Use Hindi for study answers, viva prep, and practical explanation practice.",
+    speechLang: "hi-IN"
+  },
+  {
+    name: "Kannada",
+    caption: "Build clarity in Kannada while keeping your structure simple and teachable.",
+    speechLang: "kn-IN"
+  },
+  {
+    name: "English",
+    caption: "Practice interviews, presentations, and study explanations in clear English.",
+    speechLang: "en-IN"
+  }
+];
+
+const practiceModes: Array<{
+  mode: PracticeMode;
+  label: string;
+  summary: string;
+}> = [
+  {
+    mode: "spoken",
+    label: "Speak",
+    summary: "Use live captions and judge how well your spoken explanation matches the source pack."
+  },
+  {
+    mode: "text",
+    label: "Chat / Text",
+    summary: "Type a response when you want a safer draft before speaking aloud."
+  },
+  {
+    mode: "video",
+    label: "Video + Body Language",
+    summary: "Practice with camera on, add self-review notes, and get body-language reminders with the mentor report."
+  }
+];
 
 function loadSettings(): JudgeSettings {
   try {
@@ -65,124 +154,224 @@ function loadSettings(): JudgeSettings {
   }
 }
 
-const languageSpaces: Array<{
-  name: LanguageSpace;
-  caption: string;
-  speechLang: string;
-}> = [
-  {
-    name: "Tamil",
-    caption: "Speak in Tamil the way you naturally do, including Tanglish when it helps you explain clearly.",
-    speechLang: "ta-IN"
-  },
-  {
-    name: "Hindi",
-    caption: "Practice clear Hindi explanations for study, interviews, teaching, and everyday confidence.",
-    speechLang: "hi-IN"
-  },
-  {
-    name: "Kannada",
-    caption: "Explain ideas naturally in Kannada, then tighten your structure and clarity over time.",
-    speechLang: "kn-IN"
-  },
-  {
-    name: "English",
-    caption: "Practice clean English for interviews, presentations, and professional calls.",
-    speechLang: "en-IN"
+function loadDraft(): DraftState {
+  try {
+    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+
+    if (!raw) {
+      return DEFAULT_DRAFT;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<DraftState>;
+
+    return {
+      activeSpace: parsed.activeSpace ?? DEFAULT_DRAFT.activeSpace,
+      practiceMode: parsed.practiceMode ?? DEFAULT_DRAFT.practiceMode,
+      topic: typeof parsed.topic === "string" ? parsed.topic : DEFAULT_DRAFT.topic,
+      typedResponse: typeof parsed.typedResponse === "string" ? parsed.typedResponse : DEFAULT_DRAFT.typedResponse,
+      transcript: typeof parsed.transcript === "string" ? parsed.transcript : DEFAULT_DRAFT.transcript,
+      bodyLanguageNotes: typeof parsed.bodyLanguageNotes === "string" ? parsed.bodyLanguageNotes : DEFAULT_DRAFT.bodyLanguageNotes,
+      sources: Array.isArray(parsed.sources) ? parsed.sources : DEFAULT_DRAFT.sources
+    };
+  } catch {
+    return DEFAULT_DRAFT;
   }
-];
+}
+
+function buildSourceId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function summarizeSources(sources: StudySource[]) {
+  const totalChars = sources.reduce((sum, source) => sum + source.content.length, 0);
+  return {
+    count: sources.length,
+    totalChars,
+    labels: Array.from(new Set(sources.map((source) => source.type.toUpperCase())))
+  };
+}
+
+function buildResponseText(mode: PracticeMode, transcript: string, typedResponse: string, bodyLanguageNotes: string) {
+  if (mode === "spoken") {
+    return transcript.trim();
+  }
+
+  if (mode === "text") {
+    return typedResponse.trim();
+  }
+
+  return [typedResponse.trim(), transcript.trim(), bodyLanguageNotes.trim()].filter(Boolean).join("\n\n");
+}
 
 function App() {
-  const [activeSpace, setActiveSpace] = React.useState<LanguageSpace>("English");
-  const [topic, setTopic] = React.useState("Explain something you learned today");
-  const [sourceText, setSourceText] = React.useState("");
-  const [transcript, setTranscript] = React.useState("");
+  const draft = React.useMemo(() => loadDraft(), []);
+  const [activeSpace, setActiveSpace] = React.useState<LanguageSpace>(draft.activeSpace);
+  const [practiceMode, setPracticeMode] = React.useState<PracticeMode>(draft.practiceMode);
+  const [topic, setTopic] = React.useState(draft.topic);
+  const [sources, setSources] = React.useState<StudySource[]>(draft.sources);
+  const [typedResponse, setTypedResponse] = React.useState(draft.typedResponse);
+  const [transcript, setTranscript] = React.useState(draft.transcript);
   const [interimTranscript, setInterimTranscript] = React.useState("");
+  const [bodyLanguageNotes, setBodyLanguageNotes] = React.useState(draft.bodyLanguageNotes);
+  const [manualSourceTitle, setManualSourceTitle] = React.useState("");
+  const [manualSourceContent, setManualSourceContent] = React.useState("");
+  const [linkTitle, setLinkTitle] = React.useState("");
+  const [linkUrl, setLinkUrl] = React.useState("");
+  const [linkNotes, setLinkNotes] = React.useState("");
   const [isListening, setIsListening] = React.useState(false);
   const [speechError, setSpeechError] = React.useState("");
+  const [importMessage, setImportMessage] = React.useState("");
+  const [cameraError, setCameraError] = React.useState("");
+  const [isCameraOn, setIsCameraOn] = React.useState(false);
   const [isJudging, setIsJudging] = React.useState(false);
   const [judgementError, setJudgementError] = React.useState("");
-  const [judgementReport, setJudgementReport] = React.useState<JudgementReport | null>(null);
-
-  // Use editable settings state so the form can update values live.
-  // showSettings decides whether the judge settings panel is visible.
+  const [report, setReport] = React.useState<MentorReport | null>(null);
   const [settings, setSettings] = React.useState<JudgeSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = React.useState(false);
 
   const recognitionRef = React.useRef<SpeechRecognition | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = React.useRef<MediaStream | null>(null);
 
   const activeConfig = languageSpaces.find((space) => space.name === activeSpace) ?? languageSpaces[0];
-  const canJudge = sourceText.trim().length > 0 && transcript.trim().length > 0 && !isJudging;
+  const responseText = buildResponseText(practiceMode, transcript, typedResponse, bodyLanguageNotes);
+  const canJudge = sources.length > 0 && responseText.trim().length > 0 && !isJudging;
+  const sourceSummary = summarizeSources(sources);
   const providerSummary = settings.openRouterApiKey.trim()
-    ? `OpenRouter ${settings.openRouterModel} first, Ollama ${settings.ollamaModel} on backup duty.`
-    : `OpenRouter key missing, so this screen is ready for Ollama fallback on ${settings.ollamaModel}.`;
+    ? `OpenRouter ${settings.openRouterModel} is ready, with Ollama ${settings.ollamaModel} as fallback.`
+    : `OpenRouter key missing, so the app will rely on Ollama ${settings.ollamaModel} if it is running locally.`;
   const reportTone = isJudging
-    ? "Judging your explanation now."
+    ? "The mentor is reviewing your mixed-source answer."
     : judgementError
-      ? "The judge needs a little setup help."
-      : judgementReport
-        ? "Your latest explanation has a full mentor report."
-        : "Paste a source, speak it back, then ask the mentor to judge.";
-
-  const stateCards = [
-    {
-      label: "Source ready",
-      value: sourceText.trim() ? "Loaded" : "Waiting",
-      active: Boolean(sourceText.trim())
-    },
-    {
-      label: "Voice capture",
-      value: isListening ? "Listening" : transcript.trim() ? "Captured" : "Idle",
-      active: isListening || Boolean(transcript.trim())
-    },
-    {
-      label: "Mentor report",
-      value: isJudging ? "Thinking" : judgementReport ? "Ready" : "Standby",
-      active: isJudging || Boolean(judgementReport)
-    }
-  ];
+      ? "The practice flow is ready, but the judge needs setup help."
+      : report
+        ? "Your source pack has a fresh mentor review."
+        : "Build a source pack, choose a practice mode, and ask the mentor to judge your answer.";
 
   React.useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
 
-  async function judgeExplanation() {
-    if (!canJudge) {
+  React.useEffect(() => {
+    const nextDraft: DraftState = {
+      activeSpace,
+      practiceMode,
+      topic,
+      typedResponse,
+      transcript,
+      bodyLanguageNotes,
+      sources
+    };
+
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft));
+  }, [activeSpace, practiceMode, topic, typedResponse, transcript, bodyLanguageNotes, sources]);
+
+  React.useEffect(() => {
+    return () => {
+      stopListening();
+      stopCamera();
+    };
+  }, []);
+
+  function clearJudgementState() {
+    setReport(null);
+    setJudgementError("");
+  }
+
+  function addManualSource() {
+    if (!manualSourceTitle.trim() || !manualSourceContent.trim()) {
+      setImportMessage("Add both a title and source notes before saving a manual study source.");
       return;
     }
 
-    setIsJudging(true);
-    setJudgementError("");
+    setSources((current) => [
+      {
+        id: buildSourceId("notes"),
+        title: manualSourceTitle.trim(),
+        type: "notes",
+        content: manualSourceContent.trim(),
+        importedAt: new Date().toISOString()
+      },
+      ...current
+    ]);
+    setManualSourceTitle("");
+    setManualSourceContent("");
+    setImportMessage("Manual source added to your study pack.");
+    clearJudgementState();
+  }
+
+  function addLinkSource() {
+    if (!linkUrl.trim()) {
+      setImportMessage("Paste a YouTube or web link before adding it to the study pack.");
+      return;
+    }
+
+    const normalizedTitle = linkTitle.trim() || "Linked source";
+    const normalizedUrl = linkUrl.trim();
+    const sourceType: SourceType = normalizedUrl.includes("youtube.com") || normalizedUrl.includes("youtu.be") ? "youtube" : "web";
+
+    setSources((current) => [
+      {
+        id: buildSourceId(sourceType),
+        title: normalizedTitle,
+        type: sourceType,
+        url: normalizedUrl,
+        content: linkNotes.trim() || `Reference link: ${normalizedUrl}`,
+        importedAt: new Date().toISOString()
+      },
+      ...current
+    ]);
+    setLinkTitle("");
+    setLinkUrl("");
+    setLinkNotes("");
+    setImportMessage("Linked source added. Add notes if you want the mentor to judge against key takeaways from that resource.");
+    clearJudgementState();
+  }
+
+  async function importLocalSources() {
+    setImportMessage("");
 
     try {
       const desktopApi = window.mentorDesktop;
 
-      if (!desktopApi?.judgeSpeech) {
-        throw new Error("Desktop judging bridge is not available in this build.");
+      if (!desktopApi?.pickAndImportSources) {
+        throw new Error("Desktop file import is not available in this build.");
       }
 
-      const report = await desktopApi.judgeSpeech({
-        sourceText,
-        transcript,
-        languageSpace: activeSpace,
-        settings
-      });
+      const result = await desktopApi.pickAndImportSources();
 
-      setJudgementReport(report);
+      if (!result.sources.length && !result.warnings.length) {
+        setImportMessage("No files were selected.");
+        return;
+      }
+
+      if (result.sources.length) {
+        setSources((current) => [...result.sources, ...current]);
+        clearJudgementState();
+      }
+
+      const messageBits = [
+        result.sources.length ? `${result.sources.length} file source${result.sources.length === 1 ? "" : "s"} imported.` : "",
+        result.warnings.length ? result.warnings.join(" ") : ""
+      ].filter(Boolean);
+
+      setImportMessage(messageBits.join(" "));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Judging failed. Please check your provider setup and try again.";
-      setJudgementError(message);
-      setJudgementReport(null);
-    } finally {
-      setIsJudging(false);
+      const message = error instanceof Error ? error.message : "File import failed.";
+      setImportMessage(message);
     }
+  }
+
+  function removeSource(sourceId: string) {
+    setSources((current) => current.filter((source) => source.id !== sourceId));
+    clearJudgementState();
   }
 
   function startListening() {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
 
     if (!Recognition) {
-      setSpeechError("Live captions are not available in this Electron/Chromium build yet. We will add a local Whisper adapter next.");
+      setSpeechError("Live captions are not available in this Electron/Chromium build yet.");
       return;
     }
 
@@ -207,8 +396,7 @@ function App() {
 
       if (finalText) {
         setTranscript((current) => `${current} ${finalText}`.trim());
-        setJudgementReport(null);
-        setJudgementError("");
+        clearJudgementState();
       }
 
       setInterimTranscript(interimText);
@@ -236,6 +424,87 @@ function App() {
     setInterimTranscript("");
   }
 
+  async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera access is not available in this build.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false
+      });
+
+      cameraStreamRef.current = stream;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+
+      setCameraError("");
+      setIsCameraOn(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Camera access failed.";
+      setCameraError(message);
+      setIsCameraOn(false);
+    }
+  }
+
+  function stopCamera() {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setIsCameraOn(false);
+  }
+
+  async function judgeSession() {
+    if (!canJudge) {
+      return;
+    }
+
+    setIsJudging(true);
+    setJudgementError("");
+
+    try {
+      const desktopApi = window.mentorDesktop;
+
+      if (!desktopApi?.judgeSession) {
+        throw new Error("Desktop judging bridge is not available in this build.");
+      }
+
+      const nextReport = await desktopApi.judgeSession({
+        topic,
+        languageSpace: activeSpace,
+        practiceMode,
+        sources,
+        responseText,
+        bodyLanguageNotes,
+        settings
+      });
+
+      setReport(nextReport);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Judging failed. Please check your provider setup and try again.";
+      setJudgementError(message);
+      setReport(null);
+    } finally {
+      setIsJudging(false);
+    }
+  }
+
+  function resetPractice() {
+    setTypedResponse("");
+    setTranscript("");
+    setInterimTranscript("");
+    setBodyLanguageNotes("");
+    clearJudgementState();
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -244,8 +513,8 @@ function App() {
             <Sparkles size={20} />
           </div>
           <div>
-            <p>Adaptive Mentor</p>
-            <span>Speak it. Simplify it. Own it.</span>
+            <p>AI Mentor</p>
+            <span>Multi-source speaking and clarity lab</span>
           </div>
         </div>
 
@@ -254,7 +523,7 @@ function App() {
             <Orbit size={18} />
             <span>{activeSpace} mode</span>
           </div>
-          <h2>Make the explanation feel teachable.</h2>
+          <h2>Teach back what you studied from many sources.</h2>
           <p>{activeConfig.caption}</p>
         </section>
 
@@ -266,9 +535,8 @@ function App() {
               type="button"
               onClick={() => {
                 setActiveSpace(space.name);
-                setJudgementReport(null);
-                setJudgementError("");
                 stopListening();
+                clearJudgementState();
               }}
             >
               <Languages size={18} />
@@ -291,11 +559,6 @@ function App() {
           </button>
           {showSettings ? (
             <div className="settings-panel">
-              <div className="settings-panel-header">
-                <h3>Judge settings</h3>
-                <p>Keep your provider key and model names ready before you ask for a mentor report.</p>
-              </div>
-
               <label className="settings-field">
                 <span>OpenRouter API key</span>
                 <input
@@ -339,8 +602,6 @@ function App() {
                   placeholder="llama3.1:8b"
                 />
               </label>
-
-              <p className="settings-panel-note">{providerSummary}</p>
             </div>
           ) : null}
         </section>
@@ -349,128 +610,288 @@ function App() {
       <section className="workspace">
         <header className="hero-panel">
           <div className="hero-copy">
-            <p className="eyebrow">One-screen speaking lab</p>
-            <h1>Turn rough thoughts into a student-friendly explanation.</h1>
+            <p className="eyebrow">Study pack + explanation lab</p>
+            <h1>Mix PDFs, PPTs, docs, notes, and links before you answer.</h1>
             <p className="hero-summary">{reportTone}</p>
           </div>
 
           <div className="hero-score">
-            <span>LLM judgement score</span>
-            <strong>{judgementReport ? judgementReport.score : "--"}</strong>
-            <small>{judgementReport ? "Fresh from your latest judged attempt." : "Score appears after a judged attempt."}</small>
+            <span>Mentor score</span>
+            <strong>{report ? report.score : "--"}</strong>
+            <small>{report ? "Updated from your latest judged attempt." : "Appears after the mentor reviews your answer."}</small>
           </div>
         </header>
 
         <section className="journey-strip" aria-label="Current mentor flow status">
-          {stateCards.map((card) => (
-            <div className={card.active ? "journey-card active" : "journey-card"} key={card.label}>
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-            </div>
-          ))}
+          <div className={sources.length ? "journey-card active" : "journey-card"}>
+            <span>Study pack</span>
+            <strong>{sourceSummary.count ? `${sourceSummary.count} sources` : "Empty"}</strong>
+          </div>
+          <div className={responseText ? "journey-card active" : "journey-card"}>
+            <span>Response mode</span>
+            <strong>{practiceModes.find((item) => item.mode === practiceMode)?.label ?? "Speak"}</strong>
+          </div>
+          <div className={report ? "journey-card active" : "journey-card"}>
+            <span>Mentor report</span>
+            <strong>{report ? "Ready" : isJudging ? "Thinking" : "Standby"}</strong>
+          </div>
         </section>
 
-        <section className="practice-grid">
-          <div className="practice-panel">
-            <div className="input-stack">
-              <section className="input-card">
-                <div className="panel-heading">
-                  <BookOpen size={20} />
-                  <div>
-                    <h2>Topic</h2>
-                    <p>Keep the goal simple enough that you could teach it to a classmate.</p>
-                  </div>
-                </div>
-
-                <input
-                  className="topic-input"
-                  value={topic}
-                  onChange={(event) => setTopic(event.target.value)}
-                  aria-label="Practice topic"
-                />
-              </section>
-
-              <section className="input-card source-card">
-                <div className="panel-heading">
-                  <NotebookPen size={20} />
-                  <div>
-                    <h2>Source material</h2>
-                    <p>Drop the lesson, paragraph, or summary you are trying to explain back in your own words.</p>
-                  </div>
-                </div>
-
-                <textarea
-                  className="source-input"
-                  value={sourceText}
-                  onChange={(event) => {
-                    setSourceText(event.target.value);
-                    setJudgementReport(null);
-                    setJudgementError("");
-                  }}
-                  placeholder="Paste notes, a lesson summary, article paragraph, or transcript here..."
-                  aria-label="Source material"
-                />
-              </section>
-            </div>
-
-            <section className={isListening ? "recording-surface live" : "recording-surface"}>
-              <div className="recording-header">
+        <section className="content-grid">
+          <div className="main-column">
+            <section className="workspace-card">
+              <div className="panel-heading">
+                <BookOpen size={20} />
                 <div>
-                  <p className="recording-label">{topic}</p>
-                  <h2>Live explanation capture</h2>
-                </div>
-                <div className={isListening ? "status-pill live" : "status-pill"}>
-                  <AudioLines size={16} />
-                  <span>{isListening ? "Listening now" : transcript ? "Transcript ready" : "Waiting for your voice"}</span>
+                  <h2>Source studio</h2>
+                  <p>Build one study pack from many materials before you answer.</p>
                 </div>
               </div>
 
-              <div className="transcript-box">
-                {transcript || interimTranscript ? (
-                  <>
-                    <span>{transcript}</span>
-                    <em>{interimTranscript}</em>
-                  </>
+              <div className="source-toolbar">
+                <button className="primary-action" type="button" onClick={importLocalSources}>
+                  <FilePlus2 size={18} />
+                  Import PDF / PPTX / DOCX / TXT
+                </button>
+                <div className="source-stats">
+                  <span>{sourceSummary.count} sources</span>
+                  <span>{sourceSummary.totalChars.toLocaleString()} chars</span>
+                  <span>{sourceSummary.labels.join(", ") || "No source types yet"}</span>
+                </div>
+              </div>
+
+              {importMessage ? <p className="inline-note">{importMessage}</p> : null}
+
+              <div className="source-entry-grid">
+                <div className="input-card">
+                  <div className="mini-heading">
+                    <NotebookPen size={18} />
+                    <h3>Quick notes source</h3>
+                  </div>
+                  <input
+                    className="topic-input"
+                    value={manualSourceTitle}
+                    onChange={(event) => setManualSourceTitle(event.target.value)}
+                    placeholder="Faculty notes, revision sheet, handout summary..."
+                  />
+                  <textarea
+                    className="source-input compact"
+                    value={manualSourceContent}
+                    onChange={(event) => setManualSourceContent(event.target.value)}
+                    placeholder="Paste the important points from your notes here..."
+                  />
+                  <button className="secondary-action" type="button" onClick={addManualSource}>
+                    Save notes source
+                  </button>
+                </div>
+
+                <div className="input-card">
+                  <div className="mini-heading">
+                    <Link2 size={18} />
+                    <h3>YouTube or web link</h3>
+                  </div>
+                  <input
+                    className="topic-input"
+                    value={linkTitle}
+                    onChange={(event) => setLinkTitle(event.target.value)}
+                    placeholder="Source title"
+                  />
+                  <input
+                    className="topic-input"
+                    value={linkUrl}
+                    onChange={(event) => setLinkUrl(event.target.value)}
+                    placeholder="https://youtube.com/... or https://..."
+                  />
+                  <textarea
+                    className="source-input compact"
+                    value={linkNotes}
+                    onChange={(event) => setLinkNotes(event.target.value)}
+                    placeholder="Optional notes, timestamp takeaways, or summary from this link..."
+                  />
+                  <button className="secondary-action" type="button" onClick={addLinkSource}>
+                    Add linked source
+                  </button>
+                </div>
+              </div>
+
+              <div className="source-list">
+                {sources.length ? (
+                  sources.map((source) => (
+                    <article className="source-card" key={source.id}>
+                      <div className="source-card-top">
+                        <div>
+                          <span className="source-type-tag">{source.type.toUpperCase()}</span>
+                          <h3>{source.title}</h3>
+                          <p className="source-meta">{source.fileName ?? source.url ?? "Manual study source"}</p>
+                        </div>
+                        <button className="icon-button" type="button" onClick={() => removeSource(source.id)} aria-label={`Remove ${source.title}`}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <p className="source-preview">{source.content.slice(0, 280) || "No extracted text preview yet."}</p>
+                    </article>
+                  ))
                 ) : (
-                  <span className="empty-transcript">Start speaking when you are ready. Your explanation will build here in real time.</span>
+                  <div className="empty-block">
+                    <h3>No sources yet</h3>
+                    <p>Import files, add links, or paste notes so the mentor can compare your answer against all of them together.</p>
+                  </div>
                 )}
               </div>
             </section>
 
-            {speechError ? <p className="inline-alert">{speechError}</p> : null}
+            <section className="workspace-card">
+              <div className="panel-heading">
+                <MessageSquareText size={20} />
+                <div>
+                  <h2>Practice lab</h2>
+                  <p>Choose how you want to answer: spoken, text, or video-assisted practice.</p>
+                </div>
+              </div>
 
-            <div className="action-row">
-              <button className={isListening ? "primary-action active" : "primary-action"} type="button" onClick={isListening ? stopListening : startListening}>
-                {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-                {isListening ? "Stop live captions" : "Start live captions"}
-              </button>
+              <div className="mode-toggle-row">
+                {practiceModes.map((mode) => (
+                  <button
+                    className={practiceMode === mode.mode ? "mode-toggle active" : "mode-toggle"}
+                    key={mode.mode}
+                    type="button"
+                    onClick={() => {
+                      setPracticeMode(mode.mode);
+                      clearJudgementState();
+                    }}
+                  >
+                    <span>{mode.label}</span>
+                    <small>{mode.summary}</small>
+                  </button>
+                ))}
+              </div>
 
-              <button className="secondary-action judge-action" type="button" onClick={judgeExplanation} disabled={!canJudge}>
-                <Brain size={18} />
-                {isJudging ? "Judging..." : "Judge explanation"}
-              </button>
+              <section className="input-card topic-card">
+                <div className="mini-heading">
+                  <Brain size={18} />
+                  <h3>Practice prompt</h3>
+                </div>
+                <input
+                  className="topic-input"
+                  value={topic}
+                  onChange={(event) => {
+                    setTopic(event.target.value);
+                    clearJudgementState();
+                  }}
+                  aria-label="Practice topic"
+                  placeholder="Explain your answer goal, interview question, or study topic..."
+                />
+              </section>
 
-              <button
-                className="ghost-action"
-                type="button"
-                onClick={() => {
-                  setTranscript("");
-                  setInterimTranscript("");
-                  setJudgementReport(null);
-                  setJudgementError("");
-                }}
-              >
-                Clear transcript
-              </button>
-            </div>
+              {practiceMode === "spoken" || practiceMode === "video" ? (
+                <section className={isListening ? "recording-surface live" : "recording-surface"}>
+                  <div className="recording-header">
+                    <div>
+                      <p className="recording-label">{topic}</p>
+                      <h2>Live explanation capture</h2>
+                    </div>
+                    <div className={isListening ? "status-pill live" : "status-pill"}>
+                      <AudioLines size={16} />
+                      <span>{isListening ? "Listening now" : transcript ? "Transcript ready" : "Waiting for your voice"}</span>
+                    </div>
+                  </div>
+
+                  <div className="transcript-box">
+                    {transcript || interimTranscript ? (
+                      <>
+                        <span>{transcript}</span>
+                        <em>{interimTranscript}</em>
+                      </>
+                    ) : (
+                      <span className="empty-transcript">Use live captions to capture your answer while you speak.</span>
+                    )}
+                  </div>
+
+                  {speechError ? <p className="inline-alert">{speechError}</p> : null}
+
+                  <div className="action-row">
+                    <button className={isListening ? "primary-action active" : "primary-action"} type="button" onClick={isListening ? stopListening : startListening}>
+                      {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+                      {isListening ? "Stop live captions" : "Start live captions"}
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
+              {practiceMode === "text" || practiceMode === "video" ? (
+                <section className="input-card">
+                  <div className="mini-heading">
+                    <MessageSquareText size={18} />
+                    <h3>Typed answer / chat draft</h3>
+                  </div>
+                  <textarea
+                    className="source-input answer-box"
+                    value={typedResponse}
+                    onChange={(event) => {
+                      setTypedResponse(event.target.value);
+                      clearJudgementState();
+                    }}
+                    placeholder="Type your explanation, structured answer, or chat-style draft here..."
+                  />
+                </section>
+              ) : null}
+
+              {practiceMode === "video" ? (
+                <section className="video-practice-grid">
+                  <div className="input-card">
+                    <div className="mini-heading">
+                      <Video size={18} />
+                      <h3>Body language practice</h3>
+                    </div>
+                    <div className="camera-frame">
+                      {isCameraOn ? <video autoPlay muted playsInline ref={videoRef} /> : <p>Turn on your camera to practice eye contact, posture, and confidence.</p>}
+                    </div>
+                    {cameraError ? <p className="inline-alert">{cameraError}</p> : null}
+                    <div className="action-row">
+                      <button className="primary-action" type="button" onClick={isCameraOn ? stopCamera : startCamera}>
+                        <Camera size={18} />
+                        {isCameraOn ? "Stop camera" : "Start camera"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="input-card">
+                    <div className="mini-heading">
+                      <NotebookPen size={18} />
+                      <h3>Body language notes</h3>
+                    </div>
+                    <textarea
+                      className="source-input answer-box"
+                      value={bodyLanguageNotes}
+                      onChange={(event) => {
+                        setBodyLanguageNotes(event.target.value);
+                        clearJudgementState();
+                      }}
+                      placeholder="Add self-review notes like: eye contact weak, too much looking down, posture okay, hand movements stiff..."
+                    />
+                  </div>
+                </section>
+              ) : null}
+
+              <div className="action-row">
+                <button className="secondary-action judge-action" type="button" onClick={judgeSession} disabled={!canJudge}>
+                  <Brain size={18} />
+                  {isJudging ? "Judging..." : "Judge explanation"}
+                </button>
+
+                <button className="ghost-action" type="button" onClick={resetPractice}>
+                  Clear current response
+                </button>
+              </div>
+            </section>
           </div>
 
-          <div className="feedback-panel">
+          <aside className="feedback-panel">
             <div className="panel-heading report-heading">
-              <MessageSquareText size={20} />
+              <Brain size={20} />
               <div>
                 <h2>Mentor report</h2>
-                <p>Hosted judging runs first. Local fallback only steps in when it has to.</p>
+                <p>The judge uses every source in the pack, not just one file.</p>
               </div>
             </div>
 
@@ -481,55 +902,69 @@ function App() {
               </div>
             ) : null}
 
-            {!judgementError && !judgementReport ? (
+            {!judgementError && !report ? (
               <div className="feedback-block empty-judge-state">
-                <h3>Ready to judge</h3>
-                <p>Paste source material, speak your explanation, then use the judge button for a source-aware report.</p>
+                <h3>Ready to review</h3>
+                <p>Import or add multiple sources, answer in any mode, then ask the mentor to judge your clarity and coverage.</p>
               </div>
             ) : null}
 
             {isJudging ? (
               <div className="feedback-block thinking-state">
                 <h3>Mentor is thinking</h3>
-                <p>Comparing your explanation to the source, checking what landed, and shaping your next retry.</p>
+                <p>Comparing your answer with the full study pack and shaping the next coaching step.</p>
               </div>
             ) : null}
 
-            {judgementReport ? (
+            {report ? (
               <>
                 <div className="feedback-block feature-block">
                   <h3>Source main idea</h3>
-                  <p>{judgementReport.sourceMainIdea}</p>
+                  <p>{report.sourceMainIdea}</p>
                 </div>
 
                 <div className="feedback-block feature-block">
                   <h3>Understood points</h3>
-                  {judgementReport.understoodPoints.map((item) => (
+                  {report.understoodPoints.map((item) => (
                     <p key={item}>{item}</p>
                   ))}
                 </div>
 
                 <div className="feedback-block feature-block">
                   <h3>Missing points</h3>
-                  {judgementReport.missingPoints.map((item) => (
+                  {report.missingPoints.map((item) => (
                     <p key={item}>{item}</p>
                   ))}
                 </div>
 
                 <div className="feedback-block feature-block">
                   <h3>Clarity advice</h3>
-                  {judgementReport.clarityAdvice.map((item) => (
+                  {report.clarityAdvice.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </div>
+
+                <div className="feedback-block feature-block">
+                  <h3>Confidence signals</h3>
+                  {report.confidenceSignals.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </div>
+
+                <div className="feedback-block feature-block">
+                  <h3>Body language reminders</h3>
+                  {report.bodyLanguageAdvice.map((item) => (
                     <p key={item}>{item}</p>
                   ))}
                 </div>
 
                 <div className="feedback-block feature-block final-block">
                   <h3>Follow-up question</h3>
-                  <p>{judgementReport.followUpQuestion}</p>
+                  <p>{report.followUpQuestion}</p>
                 </div>
               </>
             ) : null}
-          </div>
+          </aside>
         </section>
       </section>
     </main>

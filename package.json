@@ -9,22 +9,31 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on http://localhost:5173 && electron .",
     "build": "tsc && vite build",
+    "verify:imports": "node scripts/verify-imports.cjs",
     "preview": "vite preview",
     "start": "electron ."
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^5.0.0",
-    "vite": "^7.0.0",
-    "typescript": "^5.8.0",
+    "@babel/core": "^7.29.7",
+    "@babel/traverse": "^7.29.7",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.468.0",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "typescript": "^5.8.0",
+    "vite": "^7.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "concurrently": "^9.0.0",
+    "docx": "^9.7.1",
     "electron": "^42.1.0",
+    "pdfkit": "^0.18.0",
+    "pptxgenjs": "^4.0.1",
     "wait-on": "^8.0.0"
   }
 }
